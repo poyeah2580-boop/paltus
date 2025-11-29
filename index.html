@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PALTUS // RADIO TERMINAL</title>
+    <style>
+        :root {
+            --bg-dark: #050505;
+            --panel-bg: rgba(20, 20, 25, 0.95);
+            --neon-orange: #ff5e3a;
+            --neon-cyan: #00f3ff;
+            --neon-purple: #bc13fe;
+            --text-main: #e0e0e0;
+            --text-dim: #666;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --glass-blur: blur(12px);
+            --grid-color: rgba(0, 243, 255, 0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Courier New', Courier, monospace;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            background-color: var(--bg-dark);
+            background-image: linear-gradient(180deg, #1a0b1f 0%, #0f0f13 60%, #1f120a 100%);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 噪点纹理 */
+        body::before {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* 主容器 */
+        .device-frame {
+            width: 100%;
+            max-width: 500px;
+            height: 100%;
+            max-height: 900px;
+            background: var(--panel-bg);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            z-index: 1;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+            border-left: 1px solid var(--border-color);
+            border-right: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        @media (min-width: 501px) {
+            .device-frame {
+                height: 90vh;
+                border: 1px solid var(--border-color);
+                border-radius: 4px;
+                box-shadow: 0 0 20px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 94, 58, 0.1);
+            }
+        }
+        
+        /* --- 通用 UI 组件 --- */
+        .status-bar {
+            background: rgba(0, 0, 0, 0.6);
+            padding: 5px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 10px;
+            height: 24px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--neon-cyan);
+            text-shadow: 0 0 5px rgba(0, 243, 255, 0.5);
+            letter-spacing: 1px;
+            z-index: 10;
+        }
+        
+        .battery { display: inline-flex; align-items: center; gap: 5px; }
+        .battery-level { width: 20px; height: 8px; border: 1px solid var(--neon-cyan); padding: 1px; }
+        .battery-fill { height: 100%; width: 85%; background: var(--neon-cyan); box-shadow: 0 0 5px var(--neon-cyan); }
+        
+        /* --- 聊天界面 --- */
+        .chat-view {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            width: 100%;
+            transition: opacity 0.5s ease, transform 0.5s ease;
+        }
+        .chat-view.hidden { opacity: 0; transform: scale(0.95); pointer-events: none; position: absolute; }
+
+        .header {
+            background: linear-gradient(90deg, rgba(255, 94, 58, 0.05), transparent);
+            padding: 15px; display: flex; justify-content: space-between; align-items: center; height: 60px; border-bottom: 1px solid var(--border-color); position: relative;
+        }
+        .header::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 1px; background: linear-gradient(90deg, transparent, var(--neon-orange), transparent); opacity: 0.5; }
+        .header-id { font-size: 18px; font-weight: bold; color: #fff; letter-spacing: 2px; text-transform: uppercase; }
+        .signal-dot { width: 8px; height: 8px; background-color: var(--neon-orange); border-radius: 50%; box-shadow: 0 0 8px var(--neon-orange); animation: pulse 2s infinite; margin-right: 10px;}
+        @keyframes pulse { 0% { opacity: 0.5; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } 100% { opacity: 0.5; transform: scale(0.8); } }
+        
+        .chat-container { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; scrollbar-width: thin; scrollbar-color: var(--neon-orange) transparent; }
+        .message { display: flex; flex-direction: column; opacity: 0; transform: translateY(10px); animation: slideIn 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; max-width: 85%; }
+        @keyframes slideIn { to { opacity: 1; transform: translateY(0); } }
+        .message-received { align-self: flex-start; }
+        .message-sent { align-self: flex-end; }
+        .message-bubble { padding: 12px 16px; font-size: 14px; line-height: 1.5; position: relative; word-break: break-word; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%); }
+        .received-bubble { background: rgba(255, 255, 255, 0.05); border-left: 2px solid var(--neon-orange); color: #ddd; }
+        .sent-bubble { background: rgba(0, 243, 255, 0.1); border-right: 2px solid var(--neon-cyan); color: var(--neon-cyan); text-align: right; clip-path: polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }
+        .message::before { content: attr(data-time); font-size: 9px; color: var(--text-dim); margin-bottom: 4px; font-family: monospace; }
+        .message-sent::before { text-align: right; }
+        
+        .input-area { padding: 15px; background: rgba(0, 0, 0, 0.8); border-top: 1px solid var(--border-color); backdrop-filter: blur(20px); }
+        .input-row { display: flex; gap: 10px; margin-bottom: 15px; }
+        .message-input { flex: 1; padding: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--neon-cyan); font-size: 14px; outline: none; transition: all 0.3s; }
+        .message-input:focus { border-color: var(--neon-cyan); box-shadow: 0 0 10px rgba(0, 243, 255, 0.1); background: rgba(0, 243, 255, 0.05); }
+        .send-button { padding: 0 20px; background: transparent; border: 1px solid var(--neon-orange); color: var(--neon-orange); cursor: pointer; font-size: 12px; font-weight: bold; text-transform: uppercase; transition: all 0.2s; letter-spacing: 1px; }
+        .send-button:hover:not(:disabled) { background: var(--neon-orange); color: #000; box-shadow: 0 0 15px var(--neon-orange); }
+        .send-button:disabled { border-color: var(--text-dim); color: var(--text-dim); cursor: not-allowed; }
+
+        /* --- 地图界面 (MAP UI - 战术地图版) --- */
+        .view-layer {
+            position: absolute; top: 24px; left: 0; width: 100%; height: calc(100% - 24px);
+            background: #0a0a0a; z-index: 20; display: none; flex-direction: column; overflow: hidden;
+        }
+        .view-layer.active { display: flex; animation: viewBoot 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes viewBoot { 0% { opacity: 0; transform: scale(1.1); filter: blur(10px); } 100% { opacity: 1; transform: scale(1); filter: blur(0); } }
+
+        .map-grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-image: linear-gradient(var(--grid-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-color) 1px, transparent 1px); background-size: 40px 40px; z-index: 0; animation: scanline 8s linear infinite; }
+        @keyframes scanline { 0% { background-position: 0 0; } 100% { background-position: 0 40px; } }
+        .map-terrain { position: absolute; top: 50%; left: 50%; width: 120%; height: 120%; transform: translate(-50%, -50%); background: radial-gradient(circle at center, rgba(255, 94, 58, 0.05) 0%, transparent 70%); border: 1px solid rgba(255, 94, 58, 0.1); border-radius: 50%; z-index: 0; }
+
+        .map-header { position: absolute; top: 20px; left: 20px; z-index: 10; }
+        .map-back-btn { font-size: 24px; font-weight: bold; color: var(--text-main); text-transform: uppercase; letter-spacing: 2px; cursor: pointer; display: flex; align-items: center; gap: 10px; text-shadow: 0 0 10px rgba(255, 255, 255, 0.3); transition: 0.3s; }
+        .map-back-btn:hover { color: var(--neon-orange); text-shadow: 0 0 15px var(--neon-orange); }
+        .map-back-btn::before { content: '<'; font-family: monospace; color: var(--neon-orange); }
+        .map-subtitle { font-size: 10px; color: var(--neon-orange); margin-top: 5px; letter-spacing: 1px; border-top: 1px solid var(--neon-orange); padding-top: 2px; display: inline-block; width: 100%; }
+
+        .map-info { position: absolute; top: 20px; right: 20px; text-align: right; z-index: 10; }
+        .map-info-title { font-size: 12px; color: var(--text-dim); border-bottom: 1px solid var(--text-dim); padding-bottom: 2px; margin-bottom: 2px; }
+        .map-info-val { font-size: 14px; color: var(--neon-cyan); font-weight: bold; }
+
+        .map-nodes-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; }
+        .map-node { position: absolute; display: flex; flex-direction: column; align-items: center; cursor: pointer; transition: 0.3s; text-decoration: none; }
+        .node-icon { width: 40px; height: 40px; border: 2px solid var(--neon-cyan); background: rgba(0, 243, 255, 0.1); border-radius: 50%; display: flex; justify-content: center; align-items: center; position: relative; box-shadow: 0 0 10px var(--neon-cyan); transition: 0.3s; }
+        .node-icon svg { width: 20px; height: 20px; fill: var(--neon-cyan); }
+        .node-icon::after { content: ''; position: absolute; top: -5px; left: -5px; right: -5px; bottom: -5px; border: 1px solid var(--neon-cyan); border-radius: 50%; opacity: 0; animation: ripple 2s infinite; }
+        @keyframes ripple { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.5); opacity: 0; } }
+        .node-label { margin-top: 8px; font-size: 10px; color: var(--text-main); background: rgba(0, 0, 0, 0.7); padding: 2px 6px; border: 1px solid var(--border-color); text-transform: uppercase; letter-spacing: 1px; transition: 0.3s; }
+        .map-node:hover .node-icon { background: var(--neon-cyan); box-shadow: 0 0 20px var(--neon-cyan); }
+        .map-node:hover .node-icon svg { fill: #000; }
+        .map-node:hover .node-label { border-color: var(--neon-cyan); color: var(--neon-cyan); }
+
+        .node-1 { top: 25%; left: 20%; } .node-2 { top: 35%; right: 20%; } .node-3 { top: 50%; left: 50%; transform: translateX(-50%); } .node-4 { top: 60%; left: 15%; } .node-5 { top: 65%; right: 15%; } .node-6 { top: 80%; left: 40%; }
+
+        .map-footer { position: absolute; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; align-items: flex-end; z-index: 10; pointer-events: none; }
+        .footer-legend { display: flex; flex-direction: column; gap: 5px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-dim); }
+        .legend-box { width: 10px; height: 10px; border: 1px solid var(--text-dim); }
+        .legend-box.active { background: var(--neon-cyan); border-color: var(--neon-cyan); box-shadow: 0 0 5px var(--neon-cyan); }
+        .footer-controls { text-align: right; font-size: 10px; color: var(--text-dim); display: flex; flex-direction: column; gap: 5px; }
+        .control-key { color: var(--neon-orange); font-weight: bold; margin-right: 5px; }
+
+        /* --- 音乐界面 (MUSIC UI) --- */
+        .music-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; z-index: 5; }
+        .cassette-deck { width: 280px; height: 180px; background: #111; border: 2px solid #333; border-radius: 10px; position: relative; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; }
+        .cassette-tape { width: 240px; height: 140px; background: #222; border-radius: 5px; border: 2px solid #444; position: relative; transform: translateY(200px); transition: transform 1s cubic-bezier(0.68, -0.55, 0.27, 1.55); }
+        .cassette-tape.inserted { transform: translateY(0); }
+        .tape-label { position: absolute; top: 10px; left: 10px; right: 10px; height: 80px; background: linear-gradient(45deg, var(--neon-orange), #ff9e80); border-radius: 3px; display: flex; justify-content: center; align-items: center; color: #000; font-weight: bold; font-size: 14px; letter-spacing: 2px; }
+        .tape-wheels { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); width: 140px; height: 30px; display: flex; justify-content: space-between; }
+        .wheel { width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; background: transparent; position: relative; }
+        .wheel::after { content: ''; position: absolute; top: 0; left: 10px; width: 4px; height: 24px; background: #fff; }
+        .playing .wheel { animation: spinTape 2s linear infinite; }
+        @keyframes spinTape { 100% { transform: rotate(360deg); } }
+        .visualizer { display: flex; gap: 4px; height: 40px; align-items: flex-end; margin-top: 30px; }
+        .bar { width: 6px; background: var(--neon-cyan); animation: equalize 0.5s infinite alternate; }
+        @keyframes equalize { 0% { height: 5px; opacity: 0.3; } 100% { height: 40px; opacity: 1; box-shadow: 0 0 10px var(--neon-cyan); } }
+        .music-controls { width: 80%; margin-top: 30px; display: flex; flex-direction: column; gap: 15px; }
+        .progress-bar { width: 100%; height: 4px; background: #333; position: relative; cursor: pointer; }
+        .progress-fill { height: 100%; width: 0%; background: var(--neon-orange); box-shadow: 0 0 5px var(--neon-orange); transition: width 0.1s linear; }
+        .control-btns { display: flex; justify-content: center; gap: 20px; }
+        .ctrl-btn { background: none; border: 1px solid var(--text-main); color: var(--text-main); width: 40px; height: 40px; border-radius: 50%; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: 0.3s; }
+        .ctrl-btn:hover { border-color: var(--neon-orange); color: var(--neon-orange); box-shadow: 0 0 10px var(--neon-orange); }
+        
+        .view-header { position: absolute; top: 20px; left: 20px; z-index: 30; }
+        .back-btn { font-size: 20px; font-weight: bold; color: var(--text-main); text-transform: uppercase; letter-spacing: 2px; cursor: pointer; display: flex; align-items: center; gap: 10px; text-shadow: 0 0 10px rgba(255, 255, 255, 0.3); transition: 0.3s; }
+        .back-btn:hover { color: var(--neon-orange); text-shadow: 0 0 15px var(--neon-orange); }
+        .back-btn::before { content: '<'; font-family: monospace; color: var(--neon-orange); }
+        .view-subtitle { font-size: 10px; color: var(--neon-orange); margin-top: 5px; letter-spacing: 1px; border-top: 1px solid var(--neon-orange); padding-top: 2px; display: inline-block; width: 100%; }
+
+        /* --- 悬浮唱片 --- */
+        .floating-disc { position: absolute; bottom: 100px; right: 20px; width: 50px; height: 50px; z-index: 50; cursor: pointer; display: none; transition: transform 0.3s; }
+        .floating-disc.active { display: block; }
+        .disc-inner { width: 100%; height: 100%; border-radius: 50%; background: radial-gradient(circle, #000 30%, #111 31%, #111 50%, #000 51%); border: 1px solid var(--neon-cyan); box-shadow: 0 0 10px rgba(0, 243, 255, 0.3); position: relative; animation: spinDisc 3s linear infinite; }
+        .disc-inner.paused { animation-play-state: paused; opacity: 0.5; }
+        @keyframes spinDisc { 100% { transform: rotate(360deg); } }
+        .disc-inner::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 10px; height: 10px; background: var(--neon-orange); border-radius: 50%; }
+
+        /* 模态框 */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(5px); z-index: 100; }
+        .modal-content-wrapper { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; max-width: 300px; background: rgba(10, 10, 12, 0.95); border: 1px solid var(--neon-cyan); padding: 25px; box-shadow: 0 0 30px rgba(0, 243, 255, 0.2); text-align: center; }
+        .modal-title { color: var(--neon-cyan); font-size: 16px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 2px; border-bottom: 1px solid rgba(0, 243, 255, 0.3); padding-bottom: 10px; }
+        .modal-text p { margin: 10px 0; font-size: 12px; color: #ccc; }
+        .modal-close { margin-top: 20px; padding: 8px 25px; background: transparent; border: 1px solid var(--neon-orange); color: var(--neon-orange); cursor: pointer; font-size: 12px; transition: 0.3s; }
+        
+        #menuButton { cursor: pointer; color: var(--text-main); transition: 0.3s; }
+        #menuButton:hover { color: var(--neon-orange); filter: drop-shadow(0 0 5px var(--neon-orange)); }
+        a { color: var(--neon-cyan); text-decoration: none; border-bottom: 1px dashed var(--neon-cyan); }
+
+    </style>
+</head>
+<body>
+    <div class="device-frame">
+        <div class="status-bar">
+            <span style="opacity: 0.7;">SYS.ONLINE</span>
+            <span id="current-time">00:00</span>
+            <div class="battery">
+                <span>PWR</span>
+                <div class="battery-level">
+                    <div class="battery-fill"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 聊天界面 -->
+        <div class="chat-view" id="chatView">
+            <div class="header">
+                <div style="display: flex; align-items: center;">
+                    <div class="signal-dot"></div>
+                    <span class="header-id">PALTUS_RADIO</span>
+                </div>
+                <svg class="icon" id="menuButton" viewBox="0 0 24 24" style="width:24px; height:24px; fill:currentColor;">
+                    <path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/>
+                </svg>
+            </div>
+            
+            <div class="chat-container" id="chatContainer"></div>
+            
+            <div class="input-area">
+                <div class="input-row">
+                    <input type="text" class="message-input" id="messageInput" placeholder="INPUT_COMMAND..." autocomplete="off">
+                    <button class="send-button" id="sendButton">SEND</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 地图界面 (战术地图版) -->
+        <div class="view-layer" id="mapView">
+            <div class="map-grid"></div>
+            <div class="map-terrain"></div>
+            
+            <div class="map-header">
+                <div class="map-back-btn" onclick="backToChat()">RETURN</div>
+                <div class="map-subtitle">SECTOR: OC_DATABASE</div>
+            </div>
+
+            <div class="map-info">
+                <div class="map-info-title">COORDINATES</div>
+                <div class="map-info-val">45.4408° N</div>
+                <div class="map-info-val">12.3155° E</div>
+            </div>
+
+            <div class="map-nodes-container">
+                <a href="https://flowus.cn/paltus/share/318a5744-64fd-4b5d-9dbe-91832612cff8" target="_blank" class="map-node node-1">
+                    <div class="node-icon"><svg viewBox="0 0 24 24"><path d="M12,2L1,21H23M12,6L19.53,19H4.47"/></svg></div>
+                    <div class="node-label">家产档案</div>
+                </a>
+                <a href="https://flowus.cn/paltus/share/318a5744-64fd-4b5d-9dbe-91832612cff8" class="map-node node-2">
+                    <div class="node-icon"><svg viewBox="0 0 24 24"><path d="M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22C12,22 19,14.25 19,9A7,7 0 0,0 12,2Z"/></svg></div>
+                    <div class="node-label">世界观【未完工】</div>
+                </a>
+                <a href="#" class="map-node node-3">
+                    <div class="node-icon"><svg viewBox="0 0 24 24"><path d="M16,9H19L14,16M10,9H14L12,17M5,9H8L10,16M15,4H17L19,7H16M11,4H13L14,7H10M7,4H9L8,7H5M6,2L2,8L12,22L22,8L18,2H6Z"/></svg></div>
+                    <div class="node-label">画廊【未完工】</div>
+                </a>
+                <a href="#" class="map-node node-4">
+                    <div class="node-icon"><svg viewBox="0 0 24 24"><path d="M12,3C7.58,3 4,4.79 4,7C4,9.21 7.58,11 12,11C16.42,11 20,9.21 20,7C20,4.79 16.42,3 12,3M4,9V12C4,14.21 7.58,16 12,16C16.42,16 20,14.21 20,12V9C20,11.21 16.42,13 12,13C7.58,13 4,11.21 4,9M4,14V17C4,19.21 7.58,21 12,21C16.42,21 20,19.21 20,17V14C20,16.21 16.42,18 12,18C7.58,18 4,16.21 4,14Z"/></svg></div>
+                    <div class="node-label">数据库【未完工】</div>
+                </a>
+                <a href="#" class="map-node node-5">
+                    <div class="node-icon"><svg viewBox="0 0 24 24"><path d="M12,15C7.58,15 4,16.79 4,19V21H20V19C20,16.79 16.42,15 12,15M8,9A4,4 0 0,0 12,13A4,4 0 0,0 16,9M11.5,2C11.2,2 11,2.21 11,2.5V5.5H10V3C10,3 7.75,3.86 7.75,6.75C7.75,6.75 7,6.89 7,8H17C16.95,6.89 16.25,6.75 16.25,6.75C16.25,3.86 14,3 14,3V5.5H13V2.5C13,2.21 12.8,2 12.5,2H11.5Z"/></svg></div>
+                    <div class="node-label">了解更多【未完工】</div>
+                </a>
+                <a href="#" class="map-node node-6">
+                    <div class="node-icon"><svg viewBox="0 0 24 24"><path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M12,10.5A1.5,1.5 0 0,1 13.5,12A1.5,1.5 0 0,1 12,13.5A1.5,1.5 0 0,1 10.5,12A1.5,1.5 0 0,1 12,10.5M11,15H13V17H11V15M11,7H13V9H11V7Z"/></svg></div>
+                    <div class="node-label">关于【未完工】</div>
+                </a>
+            </div>
+
+            <div class="map-footer">
+                <div class="footer-legend">
+                    <div class="legend-item"><div class="legend-box active"></div><span>TARGET</span></div>
+                    <div class="legend-item"><div class="legend-box"></div><span>ALLIED</span></div>
+                </div>
+                <div class="footer-controls">
+                    <div><span class="control-key">[TAP]</span> ACCESS</div>
+                    <div><span class="control-key">[BACK]</span> RETURN</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 音乐界面 -->
+        <div class="view-layer" id="musicView">
+            <div class="view-header">
+                <div class="back-btn" onclick="minimizeMusic()">MINIMIZE</div>
+                <div class="view-subtitle">DECK: LO-FI_RADIO</div>
+            </div>
+            
+            <div class="music-container">
+                <div class="cassette-deck">
+                    <div class="cassette-tape" id="cassetteTape">
+                        <div class="tape-label">LATE NIGHT FM</div>
+                        <div class="tape-wheels">
+                            <div class="wheel"></div>
+                            <div class="wheel"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="visualizer" id="visualizer">
+                    <!-- JS 生成条 -->
+                </div>
+
+                <div class="music-controls">
+                    <div class="progress-bar" id="progressBar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="control-btns">
+                        <button class="ctrl-btn" onclick="togglePlay()">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" id="playIcon">
+                                <path d="M8,5.14V19.14L19,12.14L8,5.14Z" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 悬浮唱片 -->
+        <div class="floating-disc" id="floatingDisc" onclick="toggleFloating()">
+            <div class="disc-inner" id="discInner"></div>
+        </div>
+
+    </div>
+
+    <div id="keywordModal" class="modal">
+        <div class="modal-content-wrapper">
+            <div class="modal-title">/// KEYWORDS ///</div>
+            <div class="modal-text">
+                <p>> [OC] - ACCESS MAP</p>
+                <p>> [骰子] - DICE MODE</p>
+                <p>> [点歌] - MUSIC DECK</p>
+            </div>
+            <button class="modal-close" id="closeModal">TERMINATE</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 基础变量 ---
+        const chatContainer = document.getElementById('chatContainer');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const chatView = document.getElementById('chatView');
+        
+        // --- 音乐变量 ---
+        const musicView = document.getElementById('musicView');
+        const cassetteTape = document.getElementById('cassetteTape');
+        const playIcon = document.getElementById('playIcon');
+        const progressFill = document.getElementById('progressFill');
+        const floatingDisc = document.getElementById('floatingDisc');
+        const discInner = document.getElementById('discInner');
+        
+        const audio = new Audio('https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3');
+        audio.loop = true;
+        let isMusicPlaying = false;
+
+        // --- 对话内容 ---
+        const initialDialogue = [
+            "链接建立…",
+            "你好，陌生的来客",
+            "这里是PALTUS的终端界面，发送特定指令获取信息",
+            "可以试试随便发点什么？"
+        ];
+        
+        const nextDialogue = [
+            "指令确认",
+            "目前系统支持查看OC，骰子模式与点歌",
+            "DEMO版本功能受限，后续更新待定",
+            "下次访问直接发送关键词即可",
+            "点击右上角标识查看协议列表"
+        ];
+        
+        const diceResponse = [
+            "模式切换：骰子激活",
+            "输入格式：rd[数值]（例如：rd6）"
+        ];
+
+        let currentDialogueIndex = 0;
+        let playbackInterval = null;
+        let isPlaying = false;
+        let hasFirstMessage = false;
+        let isDiceMode = false;
+
+        // --- 初始化 ---
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('current-time').textContent = 
+                `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        }
+        setInterval(updateTime, 1000);
+        updateTime();
+
+        // 生成频谱条
+        const visualizer = document.getElementById('visualizer');
+        for(let i=0; i<20; i++) {
+            let bar = document.createElement('div');
+            bar.className = 'bar';
+            bar.style.animationDuration = (0.2 + Math.random() * 0.5) + 's';
+            visualizer.appendChild(bar);
+        }
+
+        // --- 消息系统 ---
+        function addMessage(text, isReceived) {
+            const msg = document.createElement('div');
+            msg.className = `message ${isReceived ? 'message-received' : 'message-sent'}`;
+            msg.setAttribute('data-time', document.getElementById('current-time').textContent);
+            msg.innerHTML = `<div class="message-bubble ${isReceived ? 'received-bubble' : 'sent-bubble'}">${text}</div>`;
+            chatContainer.appendChild(msg);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function startPlayback(messages) {
+            if (isPlaying) return;
+            isPlaying = true;
+            sendButton.disabled = true;
+            currentDialogueIndex = 0;
+            playbackInterval = setInterval(() => {
+                if (currentDialogueIndex < messages.length) {
+                    addMessage(messages[currentDialogueIndex], true);
+                    currentDialogueIndex++;
+                } else {
+                    stopPlayback();
+                }
+            }, 1000);
+        }
+        
+        function stopPlayback() {
+            clearInterval(playbackInterval);
+            isPlaying = false;
+            sendButton.disabled = false;
+        }
+
+        function sendMessage() {
+            const messageText = messageInput.value.trim();
+            if (messageText && !isPlaying) {
+                addMessage(messageText, false);
+                messageInput.value = '';
+                
+                if (!hasFirstMessage) {
+                    hasFirstMessage = true;
+                    
+                    // 第一次交互逻辑
+                    if (messageText.toUpperCase() === 'OC') {
+                        switchView('mapView');
+                    } else if (messageText === '骰子') {
+                        setTimeout(() => {
+                            startPlayback(diceResponse);
+                            isDiceMode = true;
+                        }, 500);
+                    } else if (messageText === '点歌') {
+                        switchView('musicView');
+                        setTimeout(() => {
+                            cassetteTape.classList.add('inserted');
+                            if(!isMusicPlaying) togglePlay();
+                        }, 500);
+                    } else {
+                        setTimeout(() => {
+                            startPlayback(nextDialogue);
+                        }, 500);
+                    }
+                } else {
+                    // 后续交互逻辑
+                    if (isDiceMode && messageText.toLowerCase().startsWith('rd')) {
+                        const diceNum = parseInt(messageText.substring(2).trim());
+                        if (!isNaN(diceNum) && diceNum > 0) {
+                            const result = Math.floor(Math.random() * diceNum) + 1;
+                            setTimeout(() => {
+                                addMessage(`>>判定结果: ${result}`, true);
+                            }, 500);
+                        }
+                    } else if (messageText.toUpperCase() === 'OC') {
+                        switchView('mapView');
+                    } else if (messageText === '骰子') {
+                        setTimeout(() => {
+                            startPlayback(diceResponse);
+                            isDiceMode = true;
+                        }, 500);
+                    } else if (messageText === '点歌') {
+                        switchView('musicView');
+                        setTimeout(() => {
+                            cassetteTape.classList.add('inserted');
+                            if(!isMusicPlaying) togglePlay();
+                        }, 500);
+                    }
+                }
+            }
+        }
+
+        // --- 视图切换 ---
+        function switchView(viewId) {
+            chatView.classList.add('hidden');
+            document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
+            
+            const target = document.getElementById(viewId);
+            if(target) {
+                target.classList.add('active');
+                floatingDisc.style.display = 'none';
+            }
+        }
+
+        function backToChat() {
+            document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
+            chatView.classList.remove('hidden');
+            
+            if(isMusicPlaying || audio.currentTime > 0) {
+                floatingDisc.style.display = 'block';
+                floatingDisc.classList.add('active');
+            }
+        }
+
+        // --- 音乐逻辑 ---
+        function togglePlay() {
+            if (audio.paused) {
+                audio.play();
+                isMusicPlaying = true;
+                playIcon.innerHTML = '<path d="M14,19H18V5H14M6,19H10V5H6V19Z" />';
+                cassetteTape.classList.add('playing');
+                discInner.classList.remove('paused');
+                document.querySelectorAll('.bar').forEach(b => b.style.animationPlayState = 'running');
+            } else {
+                audio.pause();
+                isMusicPlaying = false;
+                playIcon.innerHTML = '<path d="M8,5.14V19.14L19,12.14L8,5.14Z" />';
+                cassetteTape.classList.remove('playing');
+                discInner.classList.add('paused');
+                document.querySelectorAll('.bar').forEach(b => b.style.animationPlayState = 'paused');
+            }
+        }
+
+        audio.addEventListener('timeupdate', () => {
+            const percent = (audio.currentTime / audio.duration) * 100;
+            progressFill.style.width = percent + '%';
+        });
+
+        function minimizeMusic() {
+            backToChat();
+        }
+
+        function toggleFloating() {
+            switchView('musicView');
+        }
+
+        // --- 事件监听 ---
+        window.addEventListener('load', () => {
+            startPlayback(initialDialogue);
+        });
+
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
+        
+        const modal = document.getElementById('keywordModal');
+        document.getElementById('menuButton').addEventListener('click', () => modal.style.display = 'block');
+        document.getElementById('closeModal').addEventListener('click', () => modal.style.display = 'none');
+        window.addEventListener('click', (e) => { if(e.target === modal) modal.style.display = 'none'; });
+
+    </script>
+</body>
+</html>
